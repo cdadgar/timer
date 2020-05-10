@@ -5,9 +5,6 @@
 
 /*
  * todo:
- *  - add ota
- *  - add mqtt
- *  - drop alexa support (and make it work via node red?)
  */
 
 /*
@@ -21,7 +18,6 @@
  * TimeLib - https://github.com/PaulStoffregen/Time (git)
  * Timezone - https://github.com/JChristensen/Timezone (git)
  * ArduinoJson - https://github.com/bblanchon/ArduinoJson  (git)
- * Espalexa - https://github.com/Aircoookie/Espalexa (git)
  */
 
 #include <ESP8266WiFi.h>
@@ -79,11 +75,6 @@ ESP8266HTTPUpdateServer httpUpdater;
 
 // --------------------------------------------
 
-// amazon alexa support
-#include <Espalexa.h>
-
-// --------------------------------------------
-
 const char *weekdayNames[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
 
 // --------------------------------------------
@@ -94,8 +85,9 @@ unsigned long lastSeconds;
 
 #define OFF    0
 #define ON     1
-#define RUN    2
-const char *modeNames[] = { "Off", "On", "Running" };
+
+#define STOP   0
+#define RUN    1
 
 
 #define NONE         -1
@@ -117,7 +109,6 @@ int runningProgram;
 int remainingMinutes;
 int remainingSeconds;
 
-Espalexa espalexa;
 ESP8266WebServer server(80);
 File fsUploadFile;
 
@@ -149,18 +140,19 @@ typedef struct {
 
 configType config;
 
+int state = OFF;
+
 void loadConfig(void);
 void loadProgramConfig(void);
 bool setupWifi(void);
 void setupTime(void);
 void setupWebServer(void);
 void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t lenght);
-void drawMainScreen(void);
 void set(char *name, const char *value);
 void saveProgramConfig(void);
 unsigned long sendNTPpacket(IPAddress& address);
 void printTime(bool isCheckProgram, bool isTest);
-void printModeState(void);
+void printState(void);
 void sendWeb(const char *command, const char *value);
 void checkTimeMinutes(void);
 void checkTimeSeconds(void);
@@ -172,8 +164,7 @@ void update(int addr, byte data);
 void checkRemainingRunning(void);
 void printRunning(void);
 void setupRelay(void);
-void relay(bool);
-void modeChange(void);
+void relay(void);
 
 
 void setup(void) {
@@ -215,14 +206,16 @@ void setup(void) {
   remainingSeconds = 0;
 
   isSetup = true;
-  modeChange();
 }
 
 
 void setupRelay(void) {
-  pinMode(0, OUTPUT);
-  pinMode(2, OUTPUT);
-  relay(false);
+//  pinMode(0, OUTPUT);
+//  pinMode(2, OUTPUT);
+  pinMode(5, OUTPUT);
+
+  state = OFF;
+  relay();
 }
 
 
@@ -257,14 +250,6 @@ time starts at 12am = 0, and goes in 15 minute increments
   program[1].stopTime[0]  = (8+12)*4;  // 8pm
 
   saveProgramConfig(); 
-}
-
-
-void printName() {
-  if (webClient == -1)
-    return;
-    
-  sendWeb("name", config.host_name);
 }
 
 
@@ -375,28 +360,20 @@ void setupTime(void) {
 }
 
 
-void drawMainScreen(void) {
-  printTime(true, false);
-  printModeState();
+void printState(void) {
+  if (webClient != -1) {
+    char buf[3];
+    sprintf(buf, "%d", state);    
+    sendWeb("state", buf);
+  }
 }
 
 
-void printModeState(void) {
+void printMode(void) {
   if (webClient != -1) {
-    const char *msg;
-    if (config.mode == OFF)
-      msg = "Off";
-    else if (config.mode == ON)
-      msg = "On";
-    else if (runningProgram == -1)
-      msg = "Running";
-    else
-      msg = "On";
-
     char buf[3];
     sprintf(buf, "%d", config.mode);    
     sendWeb("mode", buf);
-    sendWeb("modeState", msg);
   }
 }
 
@@ -414,9 +391,7 @@ void loop(void)
     checkTimeSeconds();
 
   webSocket.loop();
-  // you can omit this line from your code since it will be called in espalexa.loop()
-  // server.handleClient();
-  espalexa.loop();
+  server.handleClient();
   MDNS.update();
   
   // mqtt
@@ -488,24 +463,20 @@ void checkTimeMinutes() {
 }
 
 
-void relay(bool isOn) {
-  int value = isOn ? HIGH : LOW;
-  digitalWrite(0, value);
-  digitalWrite(2, value);
+void relay() {
+  int value = (state == ON) ? HIGH : LOW;
+//  digitalWrite(0, value);
+//  digitalWrite(2, value);
+  digitalWrite(5, value);
 }
 
 
-void modeChange(void) {
-  saveConfig();
-  if (config.mode == OFF) {
-    stopProgram();
+void sendMqtt() {
+  if (config.use_mqtt) {
+    char topic[30];
+    sprintf(topic, "%s/state", config.host_name);
+    client.publish(topic, ((state == ON) ? "on" : "off"));
   }
-  else if (config.mode == ON) {
-    relay(true);
-  }
-
-  drawMainScreen();
-  printModeState();
 }
 
 
@@ -553,9 +524,11 @@ void printTime(bool isCheckProgram, bool isTest) {
 
 
 void startProgram(int index, int startIndex) {
-  relay(true);
+  state = ON;
+  relay();
+  sendMqtt();
 
-  printModeState();
+  printState();
 
   runningProgram = index;
 
@@ -574,10 +547,12 @@ void startProgram(int index, int startIndex) {
 
 
 void stopProgram(void) {
-  relay(false);
+  state = OFF;
+  relay();
+  sendMqtt();
 
   runningProgram = -1;
-  printModeState();
+  printState();
   if (webClient != -1)
     sendWeb("status", "");
 }
@@ -801,8 +776,9 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t lenght
         webClient = num;
       
         // send the current state
-        printName();
-        printModeState();
+        sendWeb("name", config.host_name);
+        printState();
+        printMode();
         printTime(false, false);
       }
       else if (strcmp((char *)payload,"/program") == 0) {
@@ -852,13 +828,14 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t lenght
           target = "value";
           ptr = strstr(ptr, target) + strlen(target)+3;
           config.mode = strtol(ptr, &ptr, 10);
-          modeChange();
-
-          // cpd...do mqtt
-          // mqtt
-//          char topic[30];
-//          sprintf(topic, "%s/fan", config.host_name);
-//          client.publish(topic, ((nightlightState == LOW) ? "off" : "on"));
+          saveConfig();
+        }        
+        else if (strncmp(ptr,"state",5) == 0) {
+          target = "value";
+          ptr = strstr(ptr, target) + strlen(target)+3;
+          state = strtol(ptr, &ptr, 10);
+          relay();
+          sendMqtt();
         }        
       }
       else if (num == programClient) {
@@ -883,7 +860,6 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t lenght
           ptr += 3;
         }      
         saveProgramConfig();
-        drawMainScreen();
       }
       else if (num == setupClient) {
         const char *target = "command";
@@ -1073,24 +1049,6 @@ void countRootFiles(void) {
 }
 
 
-void timerChanged(uint8_t brightness) {
-  Serial.print("Alexa changed to ");
-  Serial.println(brightness);
-    
-  if (brightness == 255) {
-    config.mode = ON;
-  }
-  else if (brightness == 0) {
-    config.mode = OFF;
-  }
-  else {
-    // dim...not supported
-    return;
-  }
-  modeChange();
-}
-
-
 void setupWebServer(void) {
   SPIFFS.begin();
 
@@ -1118,23 +1076,13 @@ void setupWebServer(void) {
   //use it to load content from SPIFFS
   server.onNotFound([](){
     if(!handleFileRead(server.uri())) {
-      // if you don't know the URI, ask espalexa whether it is an Alexa control request
-      if (!espalexa.handleAlexaApiCall(server.uri(),server.arg(0))) {
-        server.send(404, "text/plain", "FileNotFound");
-      }
+      server.send(404, "text/plain", "FileNotFound");
     }
   });
 
-  // alexa setup
-  // simplest definition, default state off
-  espalexa.addDevice("My Timer", timerChanged);
+  server.begin();
 
-  // give espalexa a pointer to your server object so it can use your server
-  // instead of creating its own
-  espalexa.begin(&server);
-  //server.begin(); //omit this since it will be done by espalexa.begin(&server)
-
-  Serial.println("HTTP and alexa server started");
+  Serial.println("HTTP server started");
 }
 
 
@@ -1151,7 +1099,7 @@ void reconnect() {
       Serial.println("connected");
       // ... and resubscribe
       char topic[30];
-      sprintf(topic, "%s/command", config.host_name);
+      sprintf(topic, "%s/state", config.host_name);
       client.subscribe(topic);
     } else {
       Serial.print("failed, rc=");
@@ -1165,30 +1113,40 @@ void reconnect() {
 
 
 void callback(char* topic, byte* payload, unsigned int length) {
-  // only topic we get is <host_name>/command or nightlight
-  
+  // only topic we get is <host_name>/state
+
+  // strip off the hostname from the topic
+  topic += strlen(config.host_name) + 1;
+
   char value[12];
   memcpy(value, payload, length);
   value[length] = '\0';
   Serial.printf("Message arrived [%s] %s\n", topic, value);
 
-//  if (strcmp(topic, "command") == 0) {
-//    // cpd...do something
-//      
-//    // also send to main display
-//    if (webClient != -1) {
-//      sendWeb("code", value);
-//    }
-//  }
-//  else {
-//    Serial.printf("Unknown topic\n");
-//  }
+  if (strcmp(topic, "state") == 0) {
+    if (strcmp(value, "on") == 0) {
+      state = ON;
+    }
+    else if (strcmp(value, "off") == 0) {
+      state = OFF;
+    }
+    else {
+      Serial.printf("Unknown command\n");
+      return;        
+    }   
+
+    relay();
+    printState();
+  }
+  else {
+    Serial.printf("Unknown topic\n");
+  }
 }
 
 
 /*
-programs will only stat when start time is hit...need to be able to start
-in the middle of a prgram, and calculate correct remaining time.
+programs will only start when start time is hit...(if mode==run), need to be able to start
+in the middle of a program, and calculate correct remaining time.
 
 not getting tx output when connected to module...light is flashing...what gives?
 
