@@ -210,9 +210,8 @@ void setup(void) {
 
 
 void setupRelay(void) {
-//  pinMode(0, OUTPUT);
-//  pinMode(2, OUTPUT);
-  pinMode(5, OUTPUT);
+  pinMode(0, OUTPUT);
+  pinMode(2, OUTPUT);
 
   state = OFF;
   relay();
@@ -465,9 +464,9 @@ void checkTimeMinutes() {
 
 void relay() {
   int value = (state == ON) ? HIGH : LOW;
-//  digitalWrite(0, value);
-//  digitalWrite(2, value);
-  digitalWrite(5, value);
+  digitalWrite(0, value);
+  digitalWrite(2, value);
+  // internal led on the wemos d1 r1
 }
 
 
