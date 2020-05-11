@@ -4,9 +4,6 @@
 <link rel="icon" type="image/x-icon" href="favicon.ico"/>
 <link rel='stylesheet' href='https://ajax.googleapis.com/ajax/libs/jqueryui/1.11.4/themes/smoothness/jquery-ui.css'>
 <style>
-#span {
-  width: 30px;
-}
 #ssid {
   width: 90px;
 }
@@ -73,7 +70,7 @@ function initGui() {
       command: 'wifi'
     };
     socket.send(JSON.stringify(json));
-	alert('Join the TIMER access point to configure the wifi');
+      alert('Join the TIMER access point to configure the wifi');
   });
 
   $('#cancel').button().click(function(event) {
@@ -84,10 +81,10 @@ function initGui() {
 function doSave() {
   var json = {
     command: 'save',
-	host_name: $('#host_name').val(),
-    use_mqtt: $('#use_mqtt').is(':checked') ? '1' : '0',
-	mqtt_ip_addr: $('#mqtt_ip_addr').val(),
-	mqtt_ip_port: $('#mqtt_ip_port').val()
+      host_name: $('#host_name').val(),
+      use_mqtt: $('#use_mqtt').is(':checked') ? '1' : '0',
+      mqtt_ip_addr: $('#mqtt_ip_addr').val(),
+      mqtt_ip_port: $('#mqtt_ip_port').val()
   };
   console.log(JSON.stringify(json));
   socket.send(JSON.stringify(json)); 
