@@ -588,7 +588,7 @@ void checkProgram(int day, int h, int m) {
 }
 
 
-#define MAGIC_NUM   0xAD
+#define MAGIC_NUM   0xBD
 
 #define MAGIC_NUM_ADDRESS      0
 #define CONFIG_ADDRESS         1
