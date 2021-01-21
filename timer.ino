@@ -18,6 +18,7 @@
  * TimeLib - https://github.com/PaulStoffregen/Time (git)
  * Timezone - https://github.com/JChristensen/Timezone (git)
  * ArduinoJson - https://github.com/bblanchon/ArduinoJson  (git)
+ * FastLED - https://github.com/FastLED/FastLED (git)
  */
 
 #include <ESP8266WiFi.h>
@@ -72,6 +73,25 @@ String ssid;
 #include <ESP8266mDNS.h>
 #include <ESP8266HTTPUpdateServer.h>
 ESP8266HTTPUpdateServer httpUpdater;
+
+// --------------------------------------------
+
+// fastled library includes
+#include <FastLED.h>
+
+//#define DATA_PIN      0   // GPIO0
+#define DATA_PIN      D1   // wemos D1
+#define LED_TYPE      WS2812
+#define COLOR_ORDER   GRB
+#define NUM_LEDS      20
+
+#define MILLI_AMPS         2000 // IMPORTANT: set the max milli-Amps of your power supply (4A = 4000mA)
+#define FRAMES_PER_SECOND  120  // here you can control the speed. With the Access Point / Web Server the animations run a bit slower.
+
+// Define the array of leds
+CRGB leds[NUM_LEDS];
+
+uint8_t brightness = 84;
 
 // --------------------------------------------
 
@@ -164,6 +184,7 @@ void update(int addr, byte data);
 void checkRemainingRunning(void);
 void printRunning(void);
 void setupRelay(void);
+void setupLed(void);
 void relay(void);
 
 
@@ -179,6 +200,7 @@ void setup(void) {
   Serial.println( __TIME__);
 
   setupRelay();
+  setupLed();
   
   if (!setupWifi())
     return;
@@ -210,11 +232,30 @@ void setup(void) {
 
 
 void setupRelay(void) {
-  pinMode(0, OUTPUT);
+//  pinMode(0, OUTPUT);
   pinMode(2, OUTPUT);
 
   state = OFF;
   relay();
+}
+
+
+void setupLed(void) {
+   FastLED.addLeds<LED_TYPE, DATA_PIN, COLOR_ORDER>(leds, NUM_LEDS);         // for WS2812 (Neopixel)
+  //FastLED.addLeds<LED_TYPE,DATA_PIN,CLK_PIN,COLOR_ORDER>(leds, NUM_LEDS); // for APA102 (Dotstar)
+  FastLED.setDither(false);
+  FastLED.setCorrection(TypicalLEDStrip);
+  FastLED.setBrightness(brightness);
+  FastLED.setMaxPowerInVoltsAndMilliamps(5, MILLI_AMPS);
+  fill_solid(leds, NUM_LEDS, CRGB::Black);
+  FastLED.show();
+}
+
+
+void fadeall() {
+  for(int i = 0; i < NUM_LEDS; i++) {
+    leds[i].nscale8(250);
+  }
 }
 
 
@@ -377,6 +418,11 @@ void printMode(void) {
 }
 
 
+int ledIndex = 0;
+int ledColorIndex = 0;
+CRGB ledColor = CRGB::Red;
+
+
 void loop(void)
 {
   if (!isSetup)
@@ -402,8 +448,39 @@ void loop(void)
   }
 
   ArduinoOTA.handle();
-}
 
+  EVERY_N_MILLISECONDS(75) {
+    leds[ledIndex] = ledColor;
+    FastLED.show();
+    if (++ledIndex == NUM_LEDS) {
+      ledIndex = 0;
+      switch(++ledColorIndex) {
+        case 1:
+        case 3:
+        case 5:
+          ledColor = CRGB::Black;
+          Serial.println("black");
+          break;
+        case 2:
+          ledColor = CRGB::Green;
+          Serial.println("green");
+          break;
+        case 4:
+          ledColor = CRGB::Blue;
+          Serial.println("blue");
+          break;
+        case 6:
+          ledColor = CRGB::Red;
+          ledColorIndex = 0;
+          Serial.println("red");
+          break;
+      }
+    }
+  }
+  
+  // insert a delay to keep the framerate modest
+//  FastLED.delay(1000 / FRAMES_PER_SECOND);
+}
 
 void checkTimeSeconds(void) {
   int seconds = second();
@@ -464,7 +541,7 @@ void checkTimeMinutes() {
 
 void relay() {
   int value = (state == ON) ? HIGH : LOW;
-  digitalWrite(0, value);
+//  digitalWrite(0, value);
   digitalWrite(2, value);
   // internal led on the wemos d1 r1
 }
